@@ -54,7 +54,7 @@
     <div id="telaLogin">
         <div class="login-card">
             <h2>Luno</h2>
-            <p>Entre com sua conta para acessar seus dados.</p>
+            <p>Entre com a sua conta para aceder aos seus dados.</p>
             <input type="email" id="loginEmail" placeholder="E-mail" autocomplete="username">
             <input type="password" id="loginSenha" placeholder="Senha" autocomplete="current-password">
             <button id="btnLogin">Entrar</button>
@@ -98,9 +98,9 @@
 
         <span class="field-label">Arredondamento da média final (turma)</span>
         <select id="tipoArredondamento">
-            <option value="padrao">Padrão: arredonda p/ 0,5 mais próximo</option>
-            <option value="up">Sempre p/ cima (0,5)</option>
-            <option value="down">Sempre p/ baixo (0,5)</option>
+            <option value="padrao">Padrão: arredonda para 0,5 mais próximo</option>
+            <option value="up">Sempre para cima (0,5)</option>
+            <option value="down">Sempre para baixo (0,5)</option>
         </select>
 
         <div id="infoMargem" class="info-box">Margem: 10.0</div>
@@ -114,7 +114,7 @@
 
     <div id="modalGerenciarTurmas" class="modal"><div class="modal-content">
         <span onclick="document.getElementById('modalGerenciarTurmas').style.display='none'" style="cursor:pointer; position:absolute; right:20px; top:10px; font-size: 20px;">❌</span>
-        <h3>Gerenciar Turmas</h3>
+        <h3>Gerir Turmas</h3>
         <p style="font-weight:bold; margin-bottom: 5px;">Ativas:</p>
         <select id="selectTurmasAtivas"></select>
         <button onclick="window.arquivarTurma()" style="background: #ffc107; margin-top:5px; color:black; font-weight:bold;">Arquivar Turma</button>
@@ -128,12 +128,12 @@
     </div></div>
 
     <div class="card">
-        <h3>Turmas <span style="cursor:pointer; margin-left:10px; font-size:1.2em;" onclick="window.abrirModalGerenciar()" title="Gerenciar Turmas">✏️</span></h3>
-        <div id="listaTurmasButtons">⏳ Carregando...</div>
+        <h3>Turmas <span style="cursor:pointer; margin-left:10px; font-size:1.2em;" onclick="window.abrirModalGerenciar()" title="Gerir Turmas">✏️</span></h3>
+        <div id="listaTurmasButtons">⏳ A carregar...</div>
         <div class="action-row">
             <button class="btn-action" onclick="window.atualizarTurma()">🔄 Atualizar</button>
             <button class="btn-action" id="btnImportarSED" onclick="document.getElementById('arquivoCsv').click()">☁️ Importar SED</button>
-            <button class="btn-action" id="btnExportar">⬇️ Baixar CSV</button>
+            <button class="btn-action" id="btnExportar">⬇️ Descarregar CSV</button>
             <button class="btn-action" onclick="window.limparDuplicados()">🧹 Duplicados</button>
         </div>
         <input type="file" id="arquivoCsv" style="display:none;" accept=".csv">
@@ -155,7 +155,6 @@
             getFirestore, doc, updateDoc, collection, getDocs, query, orderBy,
             setDoc, getDoc, arrayUnion, arrayRemove, deleteField, deleteDoc
         } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-        // ATUALIZAÇÃO IMPORTANTE: Removi bibliotecas que poderiam estar travando o navegador
         import {
             getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut
         } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
@@ -172,7 +171,7 @@
         const db = getFirestore(app);
         const auth = getAuth(app);
 
-        // MOTOR DE LOGIN CORRIGIDO E BLINDADO
+        // MOTOR DE LOGIN
         onAuthStateChanged(auth, (user) => {
             if (user) {
                 document.getElementById('telaLogin').style.display = 'none';
@@ -198,23 +197,20 @@
                 return;
             }
 
-            // Efeito visual de carregamento
-            btn.innerText = "Entrando...";
+            btn.innerText = "A entrar...";
             btn.disabled = true;
 
             try {
                 await signInWithEmailAndPassword(auth, email, senha);
-                // Se der certo, o onAuthStateChanged assume o controle e esconde a tela
             } catch (err) {
-                console.error("Erro ao fazer login:", err); // Log para te ajudar no console
+                console.error("Erro ao fazer login:", err);
                 btn.innerText = "Entrar";
                 btn.disabled = false;
                 
-                // Tradutor amigável de erros do Firebase
                 if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
                     erroBox.innerText = '❌ E-mail ou senha incorretos.';
                 } else if (err.code === 'auth/unauthorized-domain') {
-                    erroBox.innerHTML = '❌ O domínio do GitHub não está autorizado no Firebase.<br>Vá em Firebase > Authentication > Settings > Authorized domains.';
+                    erroBox.innerHTML = '❌ O domínio do GitHub não está autorizado no Firebase.<br>Vá a Firebase > Authentication > Settings > Authorized domains.';
                 } else {
                     erroBox.innerText = '❌ Erro: ' + err.message;
                 }
@@ -228,7 +224,7 @@
 
         window.fazerLogout = () => signOut(auth);
 
-        // VARIÁVEIS DO SISTEMA LUNO
+        // VARIÁVEIS GLOBAIS
         window.turmaAtual = "";
         window.alunosCache = {};
         window.avaliacoesConfig = {};   
@@ -336,7 +332,7 @@
 
         window.carregarTurma = async (nomeTurma) => {
             window.turmaAtual = nomeTurma;
-            document.querySelector('#tabelaAlunos tbody').innerHTML = "<tr><td colspan='100'>Carregando alunos...</td></tr>";
+            document.querySelector('#tabelaAlunos tbody').innerHTML = "<tr><td colspan='100'>A carregar alunos...</td></tr>";
             document.body.style.backgroundColor = window.getPaleta(nomeTurma.match(/\d+/) ? parseInt(nomeTurma.match(/\d+/)[0]) : 0)[0];
             document.getElementById("spanTurmaAtiva").innerText = window.formatarNomeTurma(nomeTurma);
 
@@ -365,358 +361,4 @@
 
             const colMax = {};
             nomesOrdenados.forEach(nome => {
-                const cfg = window.avaliacoesConfig[nome] || { tipo: "OUTRO" };
-                if (cfg.tipo === "VISTO") {
-                    colMax[nome] = Math.max(0, ...alunos.map(a => parseFloat(a.notas?.[nome]) || 0));
-                }
-            });
-
-            const headerRow = document.getElementById('headerRow');
-            headerRow.innerHTML = "<th>Nº</th><th>Nome</th>";
-            nomesOrdenados.forEach(nome => {
-                const cfg = window.avaliacoesConfig[nome] || { peso: 0, tipo: "OUTRO" };
-                const info = TIPOS[cfg.tipo] || TIPOS.OUTRO;
-                headerRow.innerHTML += `<th>
-                    <span class="tipo-badge" style="color:${info.cor};">${info.label}</span>
-                    ${nome}
-                    <span class="weight-label" onclick="window.abrirModalConfig('${esc(nome)}')">(${cfg.peso ?? 0})</span>
-                </th>`;
-            });
-            headerRow.innerHTML += `<th>Média</th>`;
-
-            const tbody = document.querySelector('#tabelaAlunos tbody');
-            tbody.innerHTML = "";
-            alunos.forEach(al => {
-                const situCor = SITU_COR[al.situacao] || "#CBD5E1";
-                const inativoStyle = (al.situacao && al.situacao.toUpperCase() !== "ATIVO") ? "text-decoration: line-through; color: #dc3545; opacity: 0.8;" : "";
-                const sufixoSituacao = (al.situacao && al.situacao.toUpperCase() !== "ATIVO") ? ` (${al.situacao})` : "";
-
-                let row = `<tr>
-                    <td>${al.chamada ?? ''}</td>
-                    <td class="editable-aluno" style="${inativoStyle}" onclick='window.abrirModalAluno("${al.id}")'>
-                        <span class="situ-dot" style="background:${situCor};"></span>${al.nome}${sufixoSituacao}
-                    </td>`;
-
-                let somaPond = 0, somaPesos = 0;
-
-                nomesOrdenados.forEach(nome => {
-                    const cfg = window.avaliacoesConfig[nome] || { tipo: "OUTRO", max: 10, peso: 0 };
-                    const raw = al.notas ? al.notas[nome] : undefined;
-                    const nota = calcularNotaFinal(cfg.tipo, raw, cfg.max, colMax[nome]);
-                    if (nota !== null) {
-                        somaPond += nota * (parseFloat(cfg.peso) || 0);
-                        somaPesos += (parseFloat(cfg.peso) || 0);
-                    }
-                    const rawVal = (raw === undefined || raw === null) ? "" : raw;
-                    row += `<td class="editable" onclick="window.abrirModalNota('${esc(nomeTurma)}', '${esc(al.id)}', '${esc(nome)}', '${esc(rawVal)}')">${fmt(nota)}</td>`;
-                });
-
-                const media = somaPesos > 0 ? arredondar(somaPond / somaPesos, window.arredondamentoAtual) : null;
-                const corMedia = media === null ? "#9CA3AF" : media >= 6 ? "#059669" : media >= 5 ? "#D97706" : "#DC2626";
-                row += `<td class="media-cell" style="color:${corMedia};">${fmt(media)}</td></tr>`;
-                tbody.innerHTML += row;
-            });
-        };
-
-        window.toggleMaxField = () => {
-            const tipo = document.getElementById("inputMetodoTipo").value;
-            document.getElementById("maxFieldWrapper").style.display = (tipo === "VISTO") ? "none" : "block";
-        };
-
-        window.abrirModalConfig = async (nomeAval) => {
-            if (!window.turmaAtual) return alert("Por favor, selecione uma turma primeiro.");
-            const cfg = nomeAval ? (window.avaliacoesConfig[nomeAval] || {}) : {};
-            const nomeInput = document.getElementById("inputMetodoNome");
-            nomeInput.value = nomeAval || "";
-            nomeInput.disabled = !!nomeAval; 
-
-            document.getElementById("inputMetodoPeso").value = cfg.peso ?? 2;
-            document.getElementById("inputMetodoTipo").value = cfg.tipo || "VISTO";
-            document.getElementById("inputMetodoMax").value = cfg.max || 10;
-            document.getElementById("tipoArredondamento").value = window.arredondamentoAtual;
-            window.toggleMaxField();
-
-            document.getElementById("btnExcluirAval").style.display = nomeAval ? "block" : "none";
-
-            const somaTotal = Object.values(window.avaliacoesConfig).reduce((a, c) => a + (parseFloat(c.peso) || 0), 0);
-            const margem = 10.0 - (somaTotal - (parseFloat(cfg.peso) || 0));
-            document.getElementById("infoMargem").innerText = `Margem disponível: ${margem.toFixed(1)}`;
-
-            document.getElementById('modalConfig').style.display = 'block';
-        };
-
-        document.getElementById("btnSalvarConfig").onclick = async () => {
-            if (!window.turmaAtual) return alert("Selecione uma turma primeiro!");
-            const nomeNovo = document.getElementById("inputMetodoNome").value.trim();
-            if (!nomeNovo) return alert("Por favor, digite um nome para o bloco.");
-
-            const peso = parseFloat(document.getElementById("inputMetodoPeso").value) || 0;
-            const tipo = document.getElementById("inputMetodoTipo").value;
-            const max = parseFloat(document.getElementById("inputMetodoMax").value) || 10;
-            const arred = document.getElementById("tipoArredondamento").value;
-
-            await setDoc(doc(db, `turmas/${window.turmaAtual}/config`, "avaliacoes"),
-                { [nomeNovo]: { peso, tipo, max } }, { merge: true });
-            await setDoc(doc(db, `turmas/${window.turmaAtual}/config`, "geral"),
-                { arredondamento: arred }, { merge: true });
-
-            window.carregarTurma(window.turmaAtual);
-            document.getElementById('modalConfig').style.display = 'none';
-        };
-
-        window.excluirAvaliacao = async () => {
-            const nome = document.getElementById("inputMetodoNome").value.trim();
-            if (!nome || !window.turmaAtual) return;
-            if (!confirm(`Excluir o bloco "${nome}"? As notas lançadas nele deixarão de aparecer.`)) return;
-            await updateDoc(doc(db, `turmas/${window.turmaAtual}/config`, "avaliacoes"), { [nome]: deleteField() });
-            document.getElementById('modalConfig').style.display = 'none';
-            window.carregarTurma(window.turmaAtual);
-        };
-
-        window.abrirModalNota = (t, id, aval, valorAtual) => {
-            window.tT = t; window.aT = id; window.aV = aval;
-            const cfg = window.avaliacoesConfig[aval] || { tipo: "OUTRO", max: 10 };
-
-            document.getElementById('tituloNotaModal').innerText = aval;
-            const input = document.getElementById('inputNota');
-            input.placeholder = cfg.tipo === "VISTO" ? "Nº de carimbos" : `Nota (0-${cfg.max || 10})`;
-            input.value = valorAtual || "";
-
-            const preview = document.getElementById('previewNota');
-            if (cfg.tipo === "VISTO") {
-                preview.style.display = "block";
-                window.atualizarPreviewVisto();
-            } else {
-                preview.style.display = "none";
-            }
-
-            document.getElementById('modalNota').style.display = 'block';
-            setTimeout(() => input.focus(), 100);
-        };
-
-        window.atualizarPreviewVisto = () => {
-            const cfg = window.avaliacoesConfig[window.aV];
-            if (!cfg || cfg.tipo !== "VISTO") return;
-            const valAtual = parseFloat(document.getElementById('inputNota').value) || 0;
-            const outrosAlunos = Object.values(window.alunosCache).filter(a => a.id !== window.aT);
-            const maxOutros = Math.max(0, ...outrosAlunos.map(a => parseFloat(a.notas?.[window.aV]) || 0));
-            const maxFinal = Math.max(maxOutros, valAtual);
-            const nota = maxFinal > 0 ? (valAtual / maxFinal) * 10 : 0;
-            document.getElementById('previewNota').innerText = `≈ ${fmt(nota)} (máx. da sala: ${maxFinal})`;
-        };
-        document.getElementById('inputNota').addEventListener('input', () => {
-            if (document.getElementById('previewNota').style.display === 'block') window.atualizarPreviewVisto();
-        });
-
-        document.getElementById("btnSalvarNota").onclick = async () => {
-            if (!window.tT) return alert("Erro: Nenhuma turma selecionada.");
-            const val = document.getElementById('inputNota').value;
-            await updateDoc(doc(db, `turmas/${window.tT}/alunos`, window.aT),
-                { [`notas.${window.aV}`]: val === "" ? deleteField() : parseFloat(val) });
-            window.carregarTurma(window.tT);
-            document.getElementById('modalNota').style.display = 'none';
-        };
-
-        window.abrirModalAluno = (id) => {
-            const aluno = window.alunosCache[id];
-            if (!aluno) return;
-            document.getElementById('tituloAlunoModal').innerText = aluno.nome;
-
-            const linkStyle = "display:block; margin-top:8px; padding:8px 12px; background:#f0f4f8; border:1px solid #cce5ff; border-radius:4px; text-decoration:none; color:#0056b3; font-weight:bold;";
-            const emails = [];
-            if (aluno.emailMS) emails.push(`<a href="mailto:${aluno.emailMS}" style="${linkStyle}">📧 Email Microsoft</a>`);
-            if (aluno.emailGoogle) emails.push(`<a href="mailto:${aluno.emailGoogle}" style="${linkStyle}">📧 Email Google</a>`);
-            const htmlEmail = emails.length > 0 ? emails.join('') : "<p style='color:#777;'>Nenhum e-mail registrado.</p>";
-
-            document.getElementById('conteudoAlunoModal').innerHTML = `
-                <p><strong>RA:</strong> ${aluno.ra || 'N/A'}</p>
-                <p><strong>Data de Nasc.:</strong> ${aluno.nascimento || 'N/A'}</p>
-                <p><strong>Situação:</strong> ${aluno.situacao || 'Ativo'}</p>
-                <hr style="margin: 15px 0;">
-                <p style="margin-bottom:5px;"><strong>Contatos:</strong></p>
-                ${htmlEmail}
-            `;
-            document.getElementById('modalAluno').style.display = 'block';
-        };
-
-        window.abrirModalGerenciar = async () => {
-            const docRef = await getDoc(doc(db, "_config", "turmas"));
-            const data = docRef.exists() ? docRef.data() : { nomes: [], mortas: [] };
-            const selA = document.getElementById("selectTurmasAtivas");
-            const selM = document.getElementById("selectTurmasMortas");
-            selA.innerHTML = ""; selM.innerHTML = "";
-            (data.nomes || []).forEach(n => selA.innerHTML += `<option value="${n}">${n}</option>`);
-            (data.mortas || []).forEach(n => selM.innerHTML += `<option value="${n}">${n}</option>`);
-            document.getElementById("modalGerenciarTurmas").style.display = "block";
-        };
-
-        window.arquivarTurma = async () => { const n = document.getElementById("selectTurmasAtivas").value; if (!n) return; await updateDoc(doc(db, "_config", "turmas"), { nomes: arrayRemove(n), mortas: arrayUnion(n) }); window.abrirModalGerenciar(); window.renderizarBotoes(); };
-        window.recuperarTurma = async () => { const n = document.getElementById("selectTurmasMortas").value; if (!n) return; await updateDoc(doc(db, "_config", "turmas"), { mortas: arrayRemove(n), nomes: arrayUnion(n) }); window.abrirModalGerenciar(); window.renderizarBotoes(); };
-        
-        window.excluirDefinitivo = async () => { 
-            const n = document.getElementById("selectTurmasMortas").value; 
-            if (!n || !confirm(`Apagar a turma "${n}" definitivamente? Todos os alunos e blocos de notas desaparecerão do banco de dados.`)) return; 
-            
-            await updateDoc(doc(db, "_config", "turmas"), { mortas: arrayRemove(n) }); 
-            
-            const alunosRef = await getDocs(collection(db, `turmas/${n}/alunos`));
-            for (const alunoDoc of alunosRef.docs) {
-                await deleteDoc(doc(db, `turmas/${n}/alunos`, alunoDoc.id));
-            }
-
-            await deleteDoc(doc(db, `turmas/${n}/config`, "avaliacoes"));
-            await deleteDoc(doc(db, `turmas/${n}/config`, "geral"));
-            await deleteDoc(doc(db, `turmas/${n}/config`, "pesos"));
-
-            if(window.turmaAtual === n) window.limparMesa();
-            window.abrirModalGerenciar(); 
-            window.renderizarBotoes(); 
-        };
-
-        window.atualizarTurma = () => { if (window.turmaAtual) window.carregarTurma(window.turmaAtual); };
-
-        window.limparDuplicados = async (turmaAlvo = null, silencioso = false) => {
-            const turma = turmaAlvo || window.turmaAtual;
-            if (!turma) return (!silencioso && alert("Selecione uma turma primeiro."));
-            if (!silencioso && !confirm("Vou fundir os alunos duplicados e apagar os restos. Posso continuar?")) return;
-
-            const snapshot = await getDocs(collection(db, `turmas/${turma}/alunos`));
-            const porNome = {};
-            snapshot.forEach(d => {
-                const al = d.data();
-                const chave = (al.nome || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
-                if (!chave) return;
-                if (!porNome[chave]) porNome[chave] = [];
-                porNome[chave].push({ id: d.id, ...al });
-            });
-
-            let corrigidos = 0;
-            for (const nome in porNome) {
-                const grupo = porNome[nome];
-                if (grupo.length < 2) continue; 
-                corrigidos++;
-
-                grupo.sort((a, b) => {
-                    const aNum = /^\d+$/.test(a.id) ? 1 : 0;
-                    const bNum = /^\d+$/.test(b.id) ? 1 : 0;
-                    if (aNum !== bNum) return bNum - aNum;
-                    
-                    const aSit = SITU_COR[a.situacao] ? 1 : 0;
-                    const bSit = SITU_COR[b.situacao] ? 1 : 0;
-                    return bSit - aSit;
-                });
-
-                const principal = grupo[0];
-                const outros = grupo.slice(1);
-
-                const notasMescladas = { ...(principal.notas || {}) };
-                outros.forEach(o => {
-                    Object.entries(o.notas || {}).forEach(([k, v]) => {
-                        if (notasMescladas[k] === undefined && v !== undefined) notasMescladas[k] = v;
-                    });
-                });
-                await setDoc(doc(db, `turmas/${turma}/alunos`, principal.id), { notas: notasMescladas }, { merge: true });
-
-                for (const o of outros) {
-                    await deleteDoc(doc(db, `turmas/${turma}/alunos`, o.id));
-                }
-            }
-
-            if (!silencioso) {
-                alert(corrigidos > 0 ? `${corrigidos} duplicata(s) removida(s).` : "A lista está perfeita. Sem duplicatas.");
-                window.carregarTurma(turma);
-            }
-        };
-
-        function detectarTurmaPeloNome(filename) {
-            const m = filename.match(/(\d)[-_\s]?(EM|EF)[-_\s]?([A-Z])/i);
-            if (!m) return null;
-            return `${m[1]}-${m[2].toUpperCase()}-${m[3].toUpperCase()}`;
-        }
-
-        document.getElementById('arquivoCsv').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const nomeTurma = detectarTurmaPeloNome(file.name) || file.name.split('.')[0].toUpperCase();
-            if (!detectarTurmaPeloNome(file.name)) {
-                if (!confirm(`Não consegui identificar a turma pelo nome do arquivo.\nUsar "${nomeTurma}" como nome da turma?`)) {
-                    e.target.value = "";
-                    return;
-                }
-            }
-
-            const reader = new FileReader();
-            const btnImport = document.getElementById('btnImportarSED');
-            btnImport.disabled = true;
-            btnImport.innerText = "⏳ Importando...";
-
-            reader.onload = async (ev) => {
-                const texto = ev.target.result.replace(/^\uFEFF/, "");
-                const linhas = texto.split(/\r?\n/);
-
-                let headerIdx = linhas.findIndex(l => l.trim().startsWith("Nº de chamada") || l.trim().startsWith("N° de chamada"));
-                if (headerIdx === -1) headerIdx = 6; 
-
-                let importados = 0;
-                for (let i = headerIdx + 1; i < linhas.length; i++) {
-                    const linha = linhas[i].trim();
-                    if (!linha) continue;
-                    const cols = linha.split(';');
-                    if (cols.length < 3) continue;
-                    const chamada = parseInt(cols[0]);
-                    if (isNaN(chamada)) continue;
-
-                    const numRA = (cols[2] || "").replace(/[^0-9]/g, "");
-                    if (!numRA) continue;
-                    const digRA = cols[3] ? cols[3].replace(/[^0-9Xx]/g, "") : "";
-                    const raFormatado = digRA ? `${numRA}-${digRA}` : numRA;
-
-                    await setDoc(doc(db, `turmas/${nomeTurma}/alunos`, numRA), {
-                        chamada: chamada,
-                        nome: (cols[1] || "").trim(),
-                        ra: raFormatado,
-                        nascimento: cols[4] ? cols[4].trim() : "",
-                        emailMS: cols[5] ? cols[5].trim() : "",
-                        emailGoogle: cols[6] ? cols[6].trim() : "",
-                        situacao: cols[7] ? cols[7].trim() : "Ativo"
-                    }, { merge: true }); 
-                    importados++;
-                }
-
-                if (importados === 0) {
-                    alert("Não encontrei alunos válidos neste CSV.");
-                    e.target.value = "";
-                    btnImport.disabled = false;
-                    btnImport.innerText = "☁️ Importar SED";
-                    return;
-                }
-
-                await setDoc(doc(db, "_config", "turmas"), { nomes: arrayUnion(nomeTurma) }, { merge: true });
-                
-                await window.limparDuplicados(nomeTurma, true);
-
-                alert(`Turma ${nomeTurma}: atualizada sem duplicatas!`);
-                btnImport.disabled = false;
-                btnImport.innerText = "☁️ Importar SED";
-                window.renderizarBotoes();
-                window.carregarTurma(nomeTurma);
-            };
-            reader.readAsText(file, 'utf-8');
-            e.target.value = "";
-        });
-
-        document.getElementById('btnExportar').addEventListener('click', () => {
-            if (!window.turmaAtual) return alert("Selecione uma turma para exportar.");
-            const csv = Array.from(document.querySelectorAll('#tabelaAlunos tr')).map(tr =>
-                Array.from(tr.querySelectorAll('td, th')).map(td => `"${td.innerText.replace(/"/g, '""')}"`).join(",")
-            ).join("\n");
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8-sig' }));
-            a.download = `${window.turmaAtual}_export.csv`;
-            a.click();
-        });
-
-    </script>
-</body>
-</html>
+                const cfg = window.avaliacoesConfig[nome] || { tipo: "OUTR
