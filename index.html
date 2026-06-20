@@ -145,6 +145,324 @@
         <div class="table-container"><table id="tabelaAlunos"><thead><tr id="headerRow"><th>Nº</th><th>Nome</th></tr></thead><tbody></tbody></table></div>
     </div>
 
+    </div><script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import {
+            getFirestore, doc, updateDoc, collection, getDocs, query, orderBy,
+            setDoc, getDoc, arrayUnion, arrayRemove, deleteField, deleteDoc
+        } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import {
+            getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence
+        } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDYv8CqjS3JBDpXVitHefum4oqxOzs67Y8",
+            authDomain: "luno-d8df7.firebaseapp.com",
+            projectId: "luno-d8df7",
+            storageBucket: "luno-d8df7.firebasestorage.app",
+            messagingSenderId: "137476519602",
+            appId: "1:137476519602:web:fb2bb6b91b0b3961be3bab"
+        };
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        setPersistence(auth, browserLocalPersistence);
+
+        // ── Autenticação ─────────────────────────────────────────────────────
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                document.getElementById('telaLogin').style.display = 'none';
+                document.getElementById('appContent').style.display = 'block';
+                window.renderizarBotoes();
+            } else {
+                document.getElementById('telaLogin').style.display = 'flex';
+                document.getElementById('appContent').style.display = 'none';
+            }
+        });
+
+        document.getElementById('btnLogin').onclick = async () => {
+            const email = document.getElementById('loginEmail').value.trim();
+            const senha = document.getElementById('loginSenha').value;
+            const erroBox = document.getElementById('erroLogin');
+            erroBox.style.display = 'none';
+            if (!email || !senha) {
+                erroBox.innerText = 'Preencha e-mail e senha.';
+                erroBox.style.display = 'block';
+                return;
+            }
+            try {
+                await signInWithEmailAndPassword(auth, email, senha);
+            } catch (err) {
+                erroBox.innerText = 'E-mail ou senha incorretos.';
+                erroBox.style.display = 'block';
+            }
+        };
+        document.getElementById('loginSenha').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') document.getElementById('btnLogin').click();
+        });
+
+        window.fazerLogout = () => signOut(auth);
+
+
+        window.turmaAtual = "";
+        window.alunosCache = {};
+        window.avaliacoesConfig = {};   
+        window.arredondamentoAtual = "padrao";
+
+        // ── Tipos de bloco avaliativo ────────────────────────────────────────
+        const TIPOS = {
+            VISTO: { label: "R&C",  cor: "#7C3AED" },
+            PP:    { label: "PP",   cor: "#1565C0" },
+            LISTA: { label: "Lista",cor: "#0891B2" },
+            DIAG:  { label: "Diag", cor: "#D97706" },
+            OUTRO: { label: "Outro",cor: "#6B7280" },
+        };
+        const SITU_COR = {
+            "Ativo": "#059669", "Remanejamento": "#D97706",
+            "BAIXA - TRANSFERÊNCIA": "#DC2626", "Transferido": "#DC2626",
+            "Não Comparecimento": "#9CA3AF",
+        };
+
+        const esc = (s) => String(s).replace(/'/g, "\\'");
+
+        // ── Cálculo de nota final a partir do valor bruto lançado ────────────
+        function calcularNotaFinal(tipo, raw, max, colMaxVistos) {
+            if (raw === undefined || raw === null || raw === "") return null;
+            const val = parseFloat(raw);
+            if (isNaN(val)) return null;
+            if (tipo === "VISTO") {
+                if (!colMaxVistos || colMaxVistos <= 0) return 0;
+                return (val / colMaxVistos) * 10;
+            }
+            const mx = max || 10;
+            return Math.min((val / mx) * 10, 10);
+        }
+
+        function arredondar(valor, tipo) {
+            if (tipo === "up") return Math.ceil(valor * 2) / 2;
+            if (tipo === "down") return Math.floor(valor * 2) / 2;
+            return Math.round(valor * 2) / 2; 
+        }
+
+        function fmt(n) {
+            if (n === null || n === undefined || isNaN(n)) return "-";
+            return n.toFixed(1).replace(".", ",");
+        }
+
+        // ── Paleta / formatação de turma ──────────────────────────────────────
+        window.getPaleta = (num) => {
+            if (num >= 3) return ['#00BCD4', '#B2DFDB'];
+            if (num == 2) return ['#E53935', '#FFCC80'];
+            if (num == 1) return ['#D81B60', '#FFF9C4'];
+            return ['#2196F3', '#EEEEEE'];
+        };
+
+        window.formatarNomeTurma = (nome) => {
+            const match = nome.match(/(\d+)[-\s]?(EF|EM)[-\s]?([A-Z])/i);
+            if (!match) return nome.toUpperCase();
+            return match[2].toUpperCase() === 'EF' ? `${match[1]}º ${match[3].toUpperCase()} - EF` : `${match[1]}ª ${match[3].toUpperCase()} - EM`;
+        };
+
+        // ── Botões de turma ────────────────────────────────────────────────────
+        window.renderizarBotoes = async () => {
+            const container = document.getElementById("listaTurmasButtons");
+            const turmasSnap = await getDoc(doc(db, "_config", "turmas"));
+            if (!turmasSnap.exists()) {
+                container.innerHTML = "Nenhuma turma.";
+                return;
+            }
+            container.innerHTML = "";
+            const turmas = (turmasSnap.data().nomes || []).sort((a, b) => {
+                const parse = (str) => {
+                    const m = str.match(/(\d+)[-\s]?(EF|EM)[-\s]?([A-Z])?/i);
+                    return m ? { num: parseInt(m[1]), type: m[2].toUpperCase(), letter: (m[3] || 'A').toUpperCase() } : { num: 99, type: 'Z', letter: 'Z' };
+                };
+                const pA = parse(a), pB = parse(b);
+                const typeOrder = { 'EF': 1, 'EM': 2 };
+                if (typeOrder[pA.type] !== typeOrder[pB.type]) return typeOrder[pA.type] - typeOrder[pB.type];
+                if (pA.num !== pB.num) return pA.num - pB.num;
+                return pA.letter.localeCompare(pB.letter);
+            });
+
+            let grupoAtual = "";
+            let containerGrupo = null;
+            turmas.forEach(n => {
+                const match = n.match(/(\d+)[-\s]?(EF|EM)/i);
+                const grade = match ? match[0].toUpperCase() : "OUTROS";
+                if (grade !== grupoAtual) {
+                    grupoAtual = grade;
+                    containerGrupo = document.createElement("div");
+                    containerGrupo.className = "group-row";
+                    container.appendChild(containerGrupo);
+                }
+                const btn = document.createElement("button");
+                btn.className = "btn-flex";
+                btn.innerText = window.formatarNomeTurma(n);
+                const numMatch = n.match(/\d+/);
+                btn.style.backgroundColor = window.getPaleta(numMatch ? parseInt(numMatch[0]) : 0)[1];
+                btn.onclick = () => window.carregarTurma(n);
+                containerGrupo.appendChild(btn);
+            });
+        };
+
+        // ── Carrega turma (alunos + config de avaliações) ─────────────────────
+        window.carregarTurma = async (nomeTurma) => {
+            window.turmaAtual = nomeTurma;
+            document.querySelector('#tabelaAlunos tbody').innerHTML = "<tr><td colspan='100'>Carregando alunos...</td></tr>";
+            document.body.style.backgroundColor = window.getPaleta(nomeTurma.match(/\d+/) ? parseInt(nomeTurma.match(/\d+/)[0]) : 0)[0];
+            document.getElementById("spanTurmaAtiva").innerText = window.formatarNomeTurma(nomeTurma);
+
+            const avalSnap = await getDoc(doc(db, `turmas/${nomeTurma}/config`, "avaliacoes"));
+            window.avaliacoesConfig = avalSnap.exists() ? avalSnap.data() : {};
+
+            const geralSnap = await getDoc(doc(db, `turmas/${nomeTurma}/config`, "geral"));
+            window.arredondamentoAtual = (geralSnap.exists() && geralSnap.data().arredondamento) || "padrao";
+
+            const snapshot = await getDocs(query(collection(db, `turmas/${nomeTurma}/alunos`), orderBy("chamada", "asc")));
+
+            let avaliacoesNomes = new Set(Object.keys(window.avaliacoesConfig));
+            let alunos = [];
+            window.alunosCache = {};
+
+            snapshot.forEach(d => {
+                let al = d.data(); al.id = d.id;
+                window.alunosCache[al.id] = al;
+                alunos.push(al);
+                if (al.notas) Object.keys(al.notas).forEach(k => avaliacoesNomes.add(k));
+            });
+
+            const nomesOrdenados = Array.from(avaliacoesNomes).sort();
+
+            const datalist = document.getElementById("avaliacoesList");
+            datalist.innerHTML = nomesOrdenados.map(n => `<option value="${n}">`).join("");
+
+            const colMax = {};
+            nomesOrdenados.forEach(nome => {
+                const cfg = window.avaliacoesConfig[nome] || { tipo: "OUTRO" };
+                if (cfg.tipo === "VISTO") {
+                    colMax[nome] = Math.max(0, ...alunos.map(a => parseFloat(a.notas?.[nome]) || 0));
+                }
+            });
+
+            const headerRow = document.getElementById('headerRow');
+            headerRow.innerHTML = "<th>Nº</th><th>Nome</th>";
+            nomesOrdenados.forEach(nome => {
+                const cfg = window.avaliacoesConfig[nome] || { peso: 0, tipo: "OUTRO" };
+                const info = TIPOS[cfg.tipo] || TIPOS.OUTRO;
+                headerRow.innerHTML += `<th>
+                    <span class="tipo-badge" style="color:${info.cor};">${info.label}</span>
+                    ${nome}
+                    <span class="weight-label" onclick="window.abrirModalConfig('${esc(nome)}')">(${cfg.        .modal-content { background: white; margin: 5% auto; padding: 20px; width: 80%; max-width: 500px; border-radius: 10px; text-align: left; position: relative; max-height: 88vh; overflow-y: auto; box-sizing: border-box; }
+        .modal-content h3 { text-align:center; }
+        .field-label { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 12px; display:block; }
+        .btn-danger-text { width:auto; background:none; color:#dc3545; text-decoration:underline; font-size:12px; padding:8px 0; margin-top:10px; cursor:pointer; border:none; }
+
+        #telaLogin { position:fixed; inset:0; background:#0A1628; display:flex; align-items:center; justify-content:center; z-index:2000; padding:20px; box-sizing:border-box; }
+        #telaLogin .login-card { background:#fff; border-radius:14px; padding:28px 24px; width:100%; max-width:340px; box-sizing:border-box; }
+        #telaLogin h2 { margin:0 0 4px; font-size:22px; }
+        #telaLogin p { margin:0 0 18px; color:#64748B; font-size:13px; }
+        #telaLogin input { border:1.5px solid #E2E8F0; border-radius:8px; font-size:15px; }
+        #btnLogin { background:#1565C0; color:#fff; font-weight:700; border:none; border-radius:8px; margin-top:14px; cursor:pointer; }
+        #erroLogin { color:#DC2626; font-size:12px; margin-top:10px; display:none; text-align:center; }
+        #btnSair { width:auto; float:right; padding:4px 12px; font-size:12px; background:#F1F5F9; color:#374151; border:none; border-radius:6px; cursor:pointer; }
+    </style>
+</head>
+<body>
+    <div id="telaLogin">
+        <div class="login-card">
+            <h2>Luno</h2>
+            <p>Entre com sua conta para acessar seus dados.</p>
+            <input type="email" id="loginEmail" placeholder="E-mail" autocomplete="username">
+            <input type="password" id="loginSenha" placeholder="Senha" autocomplete="current-password">
+            <button id="btnLogin">Entrar</button>
+            <div id="erroLogin"></div>
+        </div>
+    </div>
+
+    <div id="appContent" style="display:none;">
+    <button id="btnSair" onclick="window.fazerLogout()">Sair</button>
+    <div id="modalNota" class="modal"><div class="modal-content" style="text-align:center;">
+        <h3 id="tituloNotaModal">Lançar Nota</h3>
+        <input type="number" id="inputNota" placeholder="Nota (0-10)" min="0" step="0.1">
+        <div id="previewNota" class="info-box" style="display:none;"></div>
+        <button id="btnSalvarNota" style="background: #28a745; color: white; margin-top:12px;">Salvar</button>
+        <button onclick="document.getElementById('modalNota').style.display='none'">Cancelar</button>
+    </div></div>
+
+    <div id="modalConfig" class="modal"><div class="modal-content">
+        <h3>Bloco de Avaliação</h3>
+
+        <span class="field-label">Nome do bloco</span>
+        <input list="avaliacoesList" id="inputMetodoNome" placeholder="Ex: Vistos 18/06">
+
+        <span class="field-label">Tipo</span>
+        <select id="inputMetodoTipo" onchange="window.toggleMaxField()">
+            <option value="VISTO">✱ Vistos / Carimbos (proporcional)</option>
+            <option value="PP">📝 Prova (PP)</option>
+            <option value="LISTA">📋 Lista de exercícios</option>
+            <option value="DIAG">🔍 Prova Diagnóstica</option>
+            <option value="OUTRO">◇ Outro</option>
+        </select>
+
+        <span class="field-label">Peso (soma das colunas deve fechar em 10)</span>
+        <input type="number" id="inputMetodoPeso" placeholder="Peso" step="0.5" min="0">
+
+        <div id="maxFieldWrapper">
+            <span class="field-label">Nota máxima do bloco</span>
+            <input type="number" id="inputMetodoMax" placeholder="10" min="1" value="10">
+        </div>
+
+        <span class="field-label">Arredondamento da média final (turma)</span>
+        <select id="tipoArredondamento">
+            <option value="padrao">Padrão: arredonda p/ 0,5 mais próximo</option>
+            <option value="up">Sempre p/ cima (0,5)</option>
+            <option value="down">Sempre p/ baixo (0,5)</option>
+        </select>
+
+        <div id="infoMargem" class="info-box">Margem: 10.0</div>
+
+        <button id="btnSalvarConfig" style="background: #28a745; color: white; margin-top:14px;">Salvar</button>
+        <button onclick="document.getElementById('modalConfig').style.display='none'">Cancelar</button>
+        <button id="btnExcluirAval" class="btn-danger-text" onclick="window.excluirAvaliacao()">🗑 Excluir este bloco</button>
+    </div></div>
+
+    <div id="modalAluno" class="modal"><div class="modal-content" style="text-align:center;"><h3 id="tituloAlunoModal">Aluno</h3><div style="width:120px; height:120px; background:#eee; border:2px dashed #ccc; margin: 15px auto; display:flex; align-items:center; justify-content:center; color:#999;">Foto</div><div id="conteudoAlunoModal" style="text-align: left; font-size: 0.95em;"></div><button onclick="document.getElementById('modalAluno').style.display='none'" style="margin-top:15px; background: #6c757d; color: white;">Fechar</button></div></div>
+
+    <div id="modalGerenciarTurmas" class="modal"><div class="modal-content">
+        <span onclick="document.getElementById('modalGerenciarTurmas').style.display='none'" style="cursor:pointer; position:absolute; right:20px; top:10px; font-size: 20px;">❌</span>
+        <h3>Gerenciar Turmas</h3>
+        <p style="font-weight:bold; margin-bottom: 5px;">Ativas:</p>
+        <select id="selectTurmasAtivas"></select>
+        <button onclick="window.arquivarTurma()" style="background: #ffc107; margin-top:5px; color:black; font-weight:bold;">Arquivar Turma</button>
+        <hr style="margin:20px 0;">
+        <p style="font-weight:bold; margin-bottom: 5px;">Arquivo Morto:</p>
+        <select id="selectTurmasMortas"></select>
+        <div style="display:flex; gap:5px; margin-top:5px;">
+            <button onclick="window.recuperarTurma()" style="flex:1; background: #28a745; color: white; font-weight:bold;">Recuperar</button>
+            <button onclick="window.excluirDefinitivo()" style="flex:1; background: #dc3545; color: white; font-weight:bold;">Apagar</button>
+        </div>
+    </div></div>
+
+    <div class="card">
+        <h3>Turmas <span style="cursor:pointer; margin-left:10px; font-size:1.2em;" onclick="window.abrirModalGerenciar()" title="Gerenciar Turmas">✏️</span></h3>
+        <div id="listaTurmasButtons">⏳ Carregando...</div>
+        <div class="action-row">
+            <button class="btn-action" onclick="window.atualizarTurma()">🔄 Atualizar</button>
+            <button class="btn-action" id="btnImportarSED" onclick="document.getElementById('arquivoCsv').click()">☁️ Importar SED</button>
+            <button class="btn-action" id="btnExportar">⬇️ Baixar CSV</button>
+            <button class="btn-action" onclick="window.limparDuplicados()">🧹 Duplicados</button>
+        </div>
+        <input type="file" id="arquivoCsv" style="display:none;" accept=".csv">
+    </div>
+
+    <div class="card">
+        <h3>Alunos: <span id="spanTurmaAtiva">-</span>
+            <button onclick="window.abrirModalConfig('')" style="width:auto; float:right; padding:4px 14px; border-radius:6px; font-weight:bold; background:#7C3AED; color:#fff; border:none; cursor:pointer; font-size:13px;">+ Bloco</button>
+        </h3>
+        <datalist id="avaliacoesList"></datalist>
+        <div class="table-container"><table id="tabelaAlunos"><thead><tr id="headerRow"><th>Nº</th><th>Nome</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
     </div><!-- /appContent -->
 
     <script type="module">
