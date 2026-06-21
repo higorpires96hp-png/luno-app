@@ -340,4 +340,486 @@
                 const parse = (str) => {
                     const m = str.match(/(\d+)[-\s]?(EF|EM)[-\s]?([A-Z])?/i);
                     return m ? { num: parseInt(m[1]), type: m[2].toUpperCase(), letter: (m[3] || 'A').toUpperCase() } : { num: 99, type: 'Z', letter: 'Z' };
-              
+                };
+                const pA = parse(a), pB = parse(b);
+                const typeOrder = { 'EF': 1, 'EM': 2 };
+                if (typeOrder[pA.type] !== typeOrder[pB.type]) return typeOrder[pA.type] - typeOrder[pB.type];
+                if (pA.num !== pB.num) return pA.num - pB.num;
+                return pA.letter.localeCompare(pB.letter);
+            });
+
+            let grupoAtual = "";
+            let containerGrupo = null;
+            turmas.forEach(n => {
+                const match = n.match(/(\d+)[-\s]?(EF|EM)/i);
+                const grade = match ? match[0].toUpperCase() : "OUTROS";
+                if (grade !== grupoAtual) {
+                    grupoAtual = grade;
+                    containerGrupo = document.createElement("div");
+                    containerGrupo.className = "group-row";
+                    container.appendChild(containerGrupo);
+                }
+                const btn = document.createElement("button");
+                btn.className = "btn-flex";
+                btn.innerText = window.formatarNomeTurma(n);
+                const numMatch = n.match(/\d+/);
+                btn.style.backgroundColor = window.getPaleta(numMatch ? parseInt(numMatch[0]) : 0)[1];
+                btn.onclick = () => window.carregarTurma(n);
+                containerGrupo.appendChild(btn);
+            });
+        };
+
+        // ── Carrega dados da turma (sem renderizar diretamente) ────────────────
+        window.carregarTurma = async (nomeTurma) => {
+            window.turmaAtual = nomeTurma;
+            document.querySelector('#tabelaAlunos tbody').innerHTML = "<tr><td colspan='100'>Carregando alunos...</td></tr>";
+            document.body.style.backgroundColor = window.getPaleta(nomeTurma.match(/\d+/) ? parseInt(nomeTurma.match(/\d+/)[0]) : 0)[0];
+            document.getElementById("spanTurmaAtiva").innerText = window.formatarNomeTurma(nomeTurma);
+
+            const avalSnap = await getDoc(doc(db, `turmas/${nomeTurma}/config`, "avaliacoes"));
+            window.avaliacoesConfig = avalSnap.exists() ? avalSnap.data() : {};
+
+            const geralSnap = await getDoc(doc(db, `turmas/${nomeTurma}/config`, "geral"));
+            window.arredondamentoAtual = (geralSnap.exists() && geralSnap.data().arredondamento) || "padrao";
+
+            const snapshot = await getDocs(query(collection(db, `turmas/${nomeTurma}/alunos`), orderBy("chamada", "asc")));
+            let alunos = [];
+            window.alunosCache = {};
+            snapshot.forEach(d => {
+                let al = d.data(); al.id = d.id;
+                window.alunosCache[al.id] = al;
+                alunos.push(al);
+            });
+            window.alunosDaTurma = alunos;
+
+            window.renderizarTabela();
+        };
+
+        // ── Renderiza a tabela a partir dos dados já carregados (sem ir ao banco) ─
+        window.renderizarTabela = () => {
+            const alunos = window.alunosDaTurma || [];
+            const nomeTurma = window.turmaAtual;
+
+            let avaliacoesNomes = new Set(Object.keys(window.avaliacoesConfig));
+            alunos.forEach(al => { if (al.notas) Object.keys(al.notas).forEach(k => avaliacoesNomes.add(k)); });
+            const nomesOrdenados = Array.from(avaliacoesNomes).sort();
+
+            const datalist = document.getElementById("avaliacoesList");
+            datalist.innerHTML = nomesOrdenados.map(n => `<option value="${n}">`).join("");
+
+            // colMax dos blocos do tipo VISTO sempre considera a turma inteira,
+            // independente do filtro de exibição (Ativos/Todos).
+            const colMax = {};
+            nomesOrdenados.forEach(nome => {
+                const cfg = window.avaliacoesConfig[nome] || { tipo: "OUTRO" };
+                if (cfg.tipo === "VISTO") {
+                    colMax[nome] = Math.max(0, ...alunos.map(a => parseFloat(a.notas?.[nome]) || 0));
+                }
+            });
+
+            const headerRow = document.getElementById('headerRow');
+            headerRow.innerHTML = "<th>Nº</th><th>Nome</th>";
+            nomesOrdenados.forEach(nome => {
+                const cfg = window.avaliacoesConfig[nome] || { peso: 0, tipo: "OUTRO" };
+                const info = TIPOS[cfg.tipo] || TIPOS.OUTRO;
+                headerRow.innerHTML += `<th>
+                    <span class="tipo-badge" style="color:${info.cor};">${info.label}</span>
+                    ${nome}
+                    <span class="weight-label" onclick="window.abrirModalConfig('${esc(nome)}')">(${cfg.peso ?? 0})</span>
+                </th>`;
+            });
+            headerRow.innerHTML += `<th>Média</th>`;
+
+            const visiveis = window.filtroSituacao === 'ativos'
+                ? alunos.filter(al => al.situacao === 'Ativo')
+                : alunos;
+            const mostrarDot = window.filtroSituacao !== 'ativos';
+
+            const tbody = document.querySelector('#tabelaAlunos tbody');
+            tbody.innerHTML = "";
+            visiveis.forEach(al => {
+                const situCor = SITU_COR[al.situacao] || "#CBD5E1";
+                const dotHtml = mostrarDot ? `<span class="situ-dot" style="background:${situCor};"></span>` : "";
+
+                let row = `<tr>
+                    <td>${al.chamada ?? ''}</td>
+                    <td class="editable-aluno" onclick='window.abrirModalAluno("${al.id}")'>${dotHtml}${al.nome}</td>`;
+
+                // Média ponderada acumulativa: cada bloco contribui (nota/10)*peso.
+                // Os pesos devem somar 10 no total; blocos ainda não lançados
+                // simplesmente não contribuem ainda, refletindo o estágio real
+                // do bimestre (em vez de "normalizar" e mostrar nota cheia
+                // com base em pouquíssimos lançamentos).
+                let mediaAcumulada = 0;
+                let temNota = false;
+
+                nomesOrdenados.forEach(nome => {
+                    const cfg = window.avaliacoesConfig[nome] || { tipo: "OUTRO", max: 10, peso: 0 };
+                    const raw = al.notas ? al.notas[nome] : undefined;
+                    const nota = calcularNotaFinal(cfg.tipo, raw, cfg.max, colMax[nome]);
+                    if (nota !== null) {
+                        temNota = true;
+                        mediaAcumulada += (nota / 10) * (parseFloat(cfg.peso) || 0);
+                    }
+                    const rawVal = (raw === undefined || raw === null) ? "" : raw;
+                    row += `<td class="editable" onclick="window.abrirModalNota('${esc(nomeTurma)}', '${esc(al.id)}', '${esc(nome)}', '${esc(rawVal)}')">${fmt(nota)}</td>`;
+                });
+
+                const media = temNota ? arredondar(mediaAcumulada, window.arredondamentoAtual) : null;
+                const corMedia = media === null ? "#9CA3AF" : media >= 6 ? "#059669" : media >= 5 ? "#D97706" : "#DC2626";
+                row += `<td class="media-cell" style="color:${corMedia};">${fmt(media)}</td></tr>`;
+                tbody.innerHTML += row;
+            });
+        };
+
+        // ── Filtro Ativos / Todos ────────────────────────────────────────────
+        window.setFiltro = (valor) => {
+            window.filtroSituacao = valor;
+            document.getElementById('btnFiltroAtivos').classList.toggle('filtro-ativo', valor === 'ativos');
+            document.getElementById('btnFiltroTodos').classList.toggle('filtro-ativo', valor === 'todos');
+            window.renderizarTabela();
+        };
+
+        // ── Modal: configurar bloco de avaliação ───────────────────────────────
+        window.toggleMaxField = () => {
+            const tipo = document.getElementById("inputMetodoTipo").value;
+            document.getElementById("maxFieldWrapper").style.display = (tipo === "VISTO") ? "none" : "block";
+        };
+
+        window.abrirModalConfig = async (nomeAval) => {
+            if (!window.turmaAtual) return alert("Por favor, selecione uma turma primeiro.");
+            const cfg = nomeAval ? (window.avaliacoesConfig[nomeAval] || {}) : {};
+            const nomeInput = document.getElementById("inputMetodoNome");
+            nomeInput.value = nomeAval || "";
+            nomeInput.disabled = !!nomeAval;
+
+            document.getElementById("inputMetodoPeso").value = cfg.peso ?? 2;
+            document.getElementById("inputMetodoTipo").value = cfg.tipo || "VISTO";
+            document.getElementById("inputMetodoMax").value = cfg.max || 10;
+            document.getElementById("tipoArredondamento").value = window.arredondamentoAtual;
+            window.toggleMaxField();
+
+            document.getElementById("btnExcluirAval").style.display = nomeAval ? "block" : "none";
+
+            const somaTotal = Object.values(window.avaliacoesConfig).reduce((a, c) => a + (parseFloat(c.peso) || 0), 0);
+            const margem = 10.0 - (somaTotal - (parseFloat(cfg.peso) || 0));
+            document.getElementById("infoMargem").innerText = `Margem disponível: ${margem.toFixed(1)}`;
+
+            document.getElementById('modalConfig').style.display = 'block';
+        };
+
+        document.getElementById("btnSalvarConfig").onclick = async () => {
+            if (!window.turmaAtual) return alert("Selecione uma turma primeiro!");
+            const nomeNovo = document.getElementById("inputMetodoNome").value.trim();
+            if (!nomeNovo) return alert("Por favor, digite um nome para o bloco.");
+
+            const peso = parseFloat(document.getElementById("inputMetodoPeso").value) || 0;
+            const tipo = document.getElementById("inputMetodoTipo").value;
+            const max = parseFloat(document.getElementById("inputMetodoMax").value) || 10;
+            const arred = document.getElementById("tipoArredondamento").value;
+
+            await setDoc(doc(db, `turmas/${window.turmaAtual}/config`, "avaliacoes"),
+                { [nomeNovo]: { peso, tipo, max } }, { merge: true });
+            await setDoc(doc(db, `turmas/${window.turmaAtual}/config`, "geral"),
+                { arredondamento: arred }, { merge: true });
+
+            window.carregarTurma(window.turmaAtual);
+            document.getElementById('modalConfig').style.display = 'none';
+        };
+
+        window.excluirAvaliacao = async () => {
+            const nome = document.getElementById("inputMetodoNome").value.trim();
+            if (!nome || !window.turmaAtual) return;
+            if (!confirm(`Excluir o bloco "${nome}"? As notas de TODOS os alunos lançadas nele serão apagadas permanentemente. Essa ação não pode ser desfeita.`)) return;
+
+            await updateDoc(doc(db, `turmas/${window.turmaAtual}/config`, "avaliacoes"), { [nome]: deleteField() });
+
+            const snapshot = await getDocs(collection(db, `turmas/${window.turmaAtual}/alunos`));
+            const remocoes = [];
+            snapshot.forEach(d => {
+                const al = d.data();
+                if (al.notas && al.notas[nome] !== undefined) {
+                    remocoes.push(updateDoc(doc(db, `turmas/${window.turmaAtual}/alunos`, d.id),
+                        { [`notas.${nome}`]: deleteField() }));
+                }
+            });
+            await Promise.all(remocoes);
+
+            document.getElementById('modalConfig').style.display = 'none';
+            window.carregarTurma(window.turmaAtual);
+        };
+
+        // ── Modal: lançar nota/valor de uma célula ─────────────────────────────
+        window.abrirModalNota = (t, id, aval, valorAtual) => {
+            window.tT = t; window.aT = id; window.aV = aval;
+            const cfg = window.avaliacoesConfig[aval] || { tipo: "OUTRO", max: 10 };
+
+            document.getElementById('tituloNotaModal').innerText = aval;
+            const input = document.getElementById('inputNota');
+            input.placeholder = cfg.tipo === "VISTO" ? "Nº de registros" : `Nota (0-${cfg.max || 10})`;
+            input.value = valorAtual || "";
+
+            const preview = document.getElementById('previewNota');
+            if (cfg.tipo === "VISTO") {
+                preview.style.display = "block";
+                window.atualizarPreviewVisto();
+            } else {
+                preview.style.display = "none";
+            }
+
+            document.getElementById('modalNota').style.display = 'block';
+            setTimeout(() => input.focus(), 100);
+        };
+
+        window.atualizarPreviewVisto = () => {
+            const cfg = window.avaliacoesConfig[window.aV];
+            if (!cfg || cfg.tipo !== "VISTO") return;
+            const valAtual = parseFloat(document.getElementById('inputNota').value) || 0;
+            const outrosAlunos = Object.values(window.alunosCache).filter(a => a.id !== window.aT);
+            const maxOutros = Math.max(0, ...outrosAlunos.map(a => parseFloat(a.notas?.[window.aV]) || 0));
+            const maxFinal = Math.max(maxOutros, valAtual);
+            const nota = maxFinal > 0 ? (valAtual / maxFinal) * 10 : 0;
+            document.getElementById('previewNota').innerText = `≈ ${fmt(nota)} (máx. da sala: ${maxFinal})`;
+        };
+        document.getElementById('inputNota').addEventListener('input', () => {
+            if (document.getElementById('previewNota').style.display === 'block') window.atualizarPreviewVisto();
+        });
+
+        document.getElementById("btnSalvarNota").onclick = async () => {
+            if (!window.tT) return alert("Erro: Nenhuma turma selecionada.");
+            const val = document.getElementById('inputNota').value;
+            await updateDoc(doc(db, `turmas/${window.tT}/alunos`, window.aT),
+                { [`notas.${window.aV}`]: val === "" ? deleteField() : parseFloat(val) });
+            window.carregarTurma(window.tT);
+            document.getElementById('modalNota').style.display = 'none';
+        };
+
+        // ── Modal: ficha do aluno ──────────────────────────────────────────────
+        window.abrirModalAluno = (id) => {
+            const aluno = window.alunosCache[id];
+            if (!aluno) return;
+            document.getElementById('tituloAlunoModal').innerText = aluno.nome;
+
+            const linkStyle = "display:block; margin-top:8px; padding:8px 12px; background:#f0f4f8; border:1px solid #cce5ff; border-radius:4px; text-decoration:none; color:#0056b3; font-weight:bold;";
+            const emails = [];
+            if (aluno.emailMS) emails.push(`<a href="mailto:${aluno.emailMS}" style="${linkStyle}">📧 Email Microsoft</a>`);
+            if (aluno.emailGoogle) emails.push(`<a href="mailto:${aluno.emailGoogle}" style="${linkStyle}">📧 Email Google</a>`);
+            const htmlEmail = emails.length > 0 ? emails.join('') : "<p style='color:#777;'>Nenhum e-mail registrado.</p>";
+
+            document.getElementById('conteudoAlunoModal').innerHTML = `
+                <p><strong>RA:</strong> ${aluno.ra || 'N/A'}</p>
+                <p><strong>Data de Nasc.:</strong> ${aluno.nascimento || 'N/A'}</p>
+                <p><strong>Situação:</strong> ${aluno.situacao || 'Ativo'}</p>
+                <hr style="margin: 15px 0;">
+                <p style="margin-bottom:5px;"><strong>Contatos:</strong></p>
+                ${htmlEmail}
+            `;
+            document.getElementById('modalAluno').style.display = 'block';
+        };
+
+        // ── Gerenciar turmas (arquivar/recuperar/excluir) ──────────────────────
+        window.abrirModalGerenciar = async () => {
+            const docRef = await getDoc(doc(db, "_config", "turmas"));
+            const data = docRef.exists() ? docRef.data() : { nomes: [], mortas: [] };
+            const selA = document.getElementById("selectTurmasAtivas");
+            const selM = document.getElementById("selectTurmasMortas");
+            selA.innerHTML = ""; selM.innerHTML = "";
+            (data.nomes || []).forEach(n => selA.innerHTML += `<option value="${n}">${n}</option>`);
+            (data.mortas || []).forEach(n => selM.innerHTML += `<option value="${n}">${n}</option>`);
+            document.getElementById("modalGerenciarTurmas").style.display = "block";
+        };
+
+        window.arquivarTurma = async () => { const n = document.getElementById("selectTurmasAtivas").value; if (!n) return; await updateDoc(doc(db, "_config", "turmas"), { nomes: arrayRemove(n), mortas: arrayUnion(n) }); window.abrirModalGerenciar(); window.renderizarBotoes(); };
+        window.recuperarTurma = async () => { const n = document.getElementById("selectTurmasMortas").value; if (!n) return; await updateDoc(doc(db, "_config", "turmas"), { mortas: arrayRemove(n), nomes: arrayUnion(n) }); window.abrirModalGerenciar(); window.renderizarBotoes(); };
+        window.excluirDefinitivo = async () => { const n = document.getElementById("selectTurmasMortas").value; if (!n || !confirm("Tem certeza absoluta? Os dados serão apagados.")) return; await updateDoc(doc(db, "_config", "turmas"), { mortas: arrayRemove(n) }); window.abrirModalGerenciar(); window.renderizarBotoes(); };
+        window.atualizarTurma = () => { if (window.turmaAtual) window.carregarTurma(window.turmaAtual); };
+
+        // ── Limpeza de alunos duplicados (agora interna, automática) ───────────
+        async function limparDuplicadosInterno(nomeTurma) {
+            const snapshot = await getDocs(collection(db, `turmas/${nomeTurma}/alunos`));
+            const porNome = {};
+            snapshot.forEach(d => {
+                const al = d.data();
+                const chave = (al.nome || "").trim().toUpperCase();
+                if (!chave) return;
+                if (!porNome[chave]) porNome[chave] = [];
+                porNome[chave].push({ id: d.id, ...al });
+            });
+
+            let corrigidos = 0;
+            for (const nome in porNome) {
+                const grupo = porNome[nome];
+                if (grupo.length < 2) continue;
+                corrigidos++;
+
+                grupo.sort((a, b) => {
+                    const aOk = SITU_COR[a.situacao] ? 1 : 0;
+                    const bOk = SITU_COR[b.situacao] ? 1 : 0;
+                    if (aOk !== bOk) return bOk - aOk;
+                    return (b.ra || "").length - (a.ra || "").length;
+                });
+                const principal = grupo[0];
+                const outros = grupo.slice(1);
+
+                const notasMescladas = { ...(principal.notas || {}) };
+                outros.forEach(o => {
+                    Object.entries(o.notas || {}).forEach(([k, v]) => {
+                        if (notasMescladas[k] === undefined) notasMescladas[k] = v;
+                    });
+                });
+                await setDoc(doc(db, `turmas/${nomeTurma}/alunos`, principal.id),
+                    { notas: notasMescladas }, { merge: true });
+
+                for (const o of outros) {
+                    await deleteDoc(doc(db, `turmas/${nomeTurma}/alunos`, o.id));
+                }
+            }
+            return corrigidos;
+        }
+
+        // ── Importação de CSV da SED ────────────────────────────────────────────
+        function detectarTurmaPeloNome(filename) {
+            const m = filename.match(/(\d)[-_\s]?(EM|EF)[-_\s]?([A-Z])/i);
+            if (!m) return null;
+            return `${m[1]}-${m[2].toUpperCase()}-${m[3].toUpperCase()}`;
+        }
+
+        document.getElementById('arquivoCsv').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const nomeTurma = detectarTurmaPeloNome(file.name) || file.name.split('.')[0].toUpperCase();
+            if (!detectarTurmaPeloNome(file.name)) {
+                if (!confirm(`Não consegui identificar a turma pelo nome do arquivo.\nUsar "${nomeTurma}" como nome da turma?\n\nDica: renomeie o arquivo para algo como "7-EF-C_Alunos.csv" para detecção automática.`)) {
+                    e.target.value = "";
+                    return;
+                }
+            }
+
+            const reader = new FileReader();
+            const btnImport = document.getElementById('btnImportarSED');
+            btnImport.disabled = true;
+            btnImport.innerText = "⏳ Importando...";
+
+            reader.onload = async (ev) => {
+                const texto = ev.target.result.replace(/^\uFEFF/, "");
+                const linhas = texto.split(/\r?\n/);
+
+                let headerIdx = linhas.findIndex(l => l.trim().startsWith("Nº de chamada") || l.trim().startsWith("N° de chamada"));
+                if (headerIdx === -1) headerIdx = 6;
+
+                let importados = 0;
+                for (let i = headerIdx + 1; i < linhas.length; i++) {
+                    const linha = linhas[i].trim();
+                    if (!linha) continue;
+                    const cols = linha.split(';');
+                    if (cols.length < 3) continue;
+                    const chamada = parseInt(cols[0]);
+                    if (isNaN(chamada)) continue;
+
+                    const numRA = (cols[2] || "").replace(/[^0-9]/g, "");
+                    if (!numRA) continue;
+                    const digRA = cols[3] ? cols[3].replace(/[^0-9Xx]/g, "") : "";
+                    const raFormatado = digRA ? `${numRA}-${digRA}` : numRA;
+
+                    await setDoc(doc(db, `turmas/${nomeTurma}/alunos`, numRA), {
+                        chamada: chamada,
+                        nome: (cols[1] || "").trim(),
+                        ra: raFormatado,
+                        nascimento: cols[4] ? cols[4].trim() : "",
+                        emailMS: cols[5] ? cols[5].trim() : "",
+                        emailGoogle: cols[6] ? cols[6].trim() : "",
+                        situacao: cols[7] ? cols[7].trim() : "Ativo"
+                    }, { merge: true });
+                    importados++;
+                }
+
+                if (importados === 0) {
+                    alert("Não encontrei alunos válidos neste CSV. Verifique se é o arquivo correto da SED.");
+                    e.target.value = "";
+                    btnImport.disabled = false;
+                    btnImport.innerText = "☁️ Importar SED";
+                    return;
+                }
+
+                await setDoc(doc(db, "_config", "turmas"), { nomes: arrayUnion(nomeTurma) }, { merge: true });
+
+                // Limpeza automática de duplicados, sem depender de ação do usuário
+                const duplicatasCorrigidas = await limparDuplicadosInterno(nomeTurma);
+
+                let msg = `Turma ${nomeTurma}: ${importados} alunos importados/atualizados.`;
+                if (duplicatasCorrigidas > 0) msg += `\n${duplicatasCorrigidas} duplicata(s) corrigida(s) automaticamente.`;
+                alert(msg);
+
+                btnImport.disabled = false;
+                btnImport.innerText = "☁️ Importar SED";
+                window.renderizarBotoes();
+                window.carregarTurma(nomeTurma);
+            };
+            reader.readAsText(file, 'utf-8');
+            e.target.value = "";
+        });
+
+        // ── Exportação CSV ──────────────────────────────────────────────────────
+        document.getElementById('btnExportar').addEventListener('click', () => {
+            if (!window.turmaAtual) return alert("Selecione uma turma para exportar.");
+            const csv = Array.from(document.querySelectorAll('#tabelaAlunos tr')).map(tr =>
+                Array.from(tr.querySelectorAll('td, th')).map(td => `"${td.innerText.replace(/"/g, '""')}"`).join(",")
+            ).join("\n");
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8-sig' }));
+            a.download = `${window.turmaAtual}_export.csv`;
+            a.click();
+        });
+
+        // ── Módulo Cadastro: grade de horários ──────────────────────────────────
+        window.renderizarGradeHorario = async () => {
+            const snap = await getDoc(doc(db, "_config", "horario"));
+            window.horarioAtual = snap.exists() ? snap.data() : {};
+
+            let html = '<table><thead><tr><th>Aula</th>' + DIAS.map(d => `<th>${DIAS_LABEL[d]}</th>`).join('') + '</tr></thead><tbody>';
+            PERIODOS.forEach(p => {
+                html += `<tr><td style="text-align:left; white-space:nowrap;"><strong>${p.label}</strong><br><span style="color:#888; font-size:0.85em;">${p.hora}</span></td>`;
+                DIAS.forEach(d => {
+                    const chave = `${d}-${p.n}`;
+                    const turma = window.horarioAtual[chave];
+                    const estilo = turma ? 'background:#EFF6FF; font-weight:700; color:#1565C0;' : 'color:#ccc;';
+                    html += `<td class="editable" style="${estilo}" onclick="window.abrirModalHorario('${d}', ${p.n})">${turma ? window.formatarNomeTurma(turma) : '+'}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            document.getElementById('gradeHorario').innerHTML = html;
+        };
+
+        window.abrirModalHorario = async (dia, periodo) => {
+            window.horarioDiaAtual = dia;
+            window.horarioPeriodoAtual = periodo;
+
+            const turmasSnap = await getDoc(doc(db, "_config", "turmas"));
+            const nomes = turmasSnap.exists() ? (turmasSnap.data().nomes || []) : [];
+            const sel = document.getElementById('selectHorarioTurma');
+            sel.innerHTML = '<option value="">— Vago —</option>' + nomes.map(n => `<option value="${n}">${window.formatarNomeTurma(n)}</option>`).join('');
+            sel.value = window.horarioAtual[`${dia}-${periodo}`] || "";
+
+            const periodoInfo = PERIODOS.find(p => p.n === periodo);
+            document.getElementById('tituloHorarioModal').innerText = `${DIAS_LABEL[dia]} · ${periodoInfo.label} aula (${periodoInfo.hora})`;
+            document.getElementById('modalHorario').style.display = 'block';
+        };
+
+        document.getElementById('btnSalvarHorario').onclick = async () => {
+            const chave = `${window.horarioDiaAtual}-${window.horarioPeriodoAtual}`;
+            const valor = document.getElementById('selectHorarioTurma').value;
+            if (valor) {
+                await setDoc(doc(db, "_config", "horario"), { [chave]: valor }, { merge: true });
+            } else {
+                await setDoc(doc(db, "_config", "horario"), { [chave]: deleteField() }, { merge: true });
+            }
+            document.getElementById('modalHorario').style.display = 'none';
+            window.renderizarGradeHorario();
+        };
+
+        // Inicialização ocorre via onAuthStateChanged, no topo do script.
+    </script>
+</body>
+</html>
