@@ -63,6 +63,27 @@
 
     <div id="appContent" style="display:none;">
     <button id="btnSair" onclick="window.fazerLogout()">Sair</button>
+
+    <div class="card">
+        <h3>Turmas <span style="cursor:pointer; margin-left:10px; font-size:1.2em;" onclick="window.abrirModalGerenciar()" title="Gerenciar Turmas">✏️</span></h3>
+        <div id="listaTurmasButtons">⏳ Carregando...</div>
+        <div class="action-row">
+            <button class="btn-action" onclick="window.atualizarTurma()">🔄 Atualizar</button>
+            <button class="btn-action" id="btnImportarSED" onclick="document.getElementById('arquivoCsv').click()">☁️ Importar SED</button>
+            <button class="btn-action" id="btnExportar">⬇️ Baixar CSV</button>
+            <button class="btn-action" onclick="window.limparDuplicados()">🧹 Duplicados</button>
+        </div>
+        <input type="file" id="arquivoCsv" style="display:none;" accept=".csv">
+    </div>
+
+    <div class="card">
+        <h3>Alunos: <span id="spanTurmaAtiva">-</span>
+            <button onclick="window.abrirModalConfig('')" style="width:auto; float:right; padding:4px 14px; border-radius:6px; font-weight:bold; background:#7C3AED; color:#fff; border:none; cursor:pointer; font-size:13px;">+ Bloco</button>
+        </h3>
+        <datalist id="avaliacoesList"></datalist>
+        <div class="table-container"><table id="tabelaAlunos"><thead><tr id="headerRow"><th>Nº</th><th>Nome</th></tr></thead><tbody></tbody></table></div>
+    </div>
+
     <div id="modalNota" class="modal"><div class="modal-content" style="text-align:center;">
         <h3 id="tituloNotaModal">Lançar Nota</h3>
         <input type="number" id="inputNota" placeholder="Nota (0-10)" min="0" step="0.1">
@@ -125,26 +146,6 @@
         </div>
     </div></div>
 
-    <div class="card">
-        <h3>Turmas <span style="cursor:pointer; margin-left:10px; font-size:1.2em;" onclick="window.abrirModalGerenciar()" title="Gerenciar Turmas">✏️</span></h3>
-        <div id="listaTurmasButtons">⏳ Carregando...</div>
-        <div class="action-row">
-            <button class="btn-action" onclick="window.atualizarTurma()">🔄 Atualizar</button>
-            <button class="btn-action" id="btnImportarSED" onclick="document.getElementById('arquivoCsv').click()">☁️ Importar SED</button>
-            <button class="btn-action" id="btnExportar">⬇️ Baixar CSV</button>
-            <button class="btn-action" onclick="window.limparDuplicados()">🧹 Duplicados</button>
-        </div>
-        <input type="file" id="arquivoCsv" style="display:none;" accept=".csv">
-    </div>
-
-    <div class="card">
-        <h3>Alunos: <span id="spanTurmaAtiva">-</span>
-            <button onclick="window.abrirModalConfig('')" style="width:auto; float:right; padding:4px 14px; border-radius:6px; font-weight:bold; background:#7C3AED; color:#fff; border:none; cursor:pointer; font-size:13px;">+ Bloco</button>
-        </h3>
-        <datalist id="avaliacoesList"></datalist>
-        <div class="table-container"><table id="tabelaAlunos"><thead><tr id="headerRow"><th>Nº</th><th>Nome</th></tr></thead><tbody></tbody></table></div>
-    </div>
-
     </div><!-- /appContent -->
 
     <script type="module">
@@ -204,7 +205,6 @@
         });
 
         window.fazerLogout = () => signOut(auth);
-
 
         window.turmaAtual = "";
         window.alunosCache = {};
